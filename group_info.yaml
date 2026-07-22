@@ -1,0 +1,8 @@
+group: "G31"
+members:
+  - name: "[Paolo Giosuè Serra]"
+    student_id: "[60/61/66465]"
+  - name: "[Marco Loddo]"
+    student_id: "[60/61/66444]"
+llm_tools:
+  - "Gemini Pro 3.1"
