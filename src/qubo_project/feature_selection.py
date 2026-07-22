@@ -5,8 +5,8 @@ import time
 import argparse
 import csv
 from scipy.stats import spearmanr
+from sklearn.model_selection import train_test_split # Aggiunta per uno split sicuro e randomizzato
 import neal  # Richiede: pip install neal
-
 
 def select_features(
         normalized_csv: str,
@@ -29,8 +29,8 @@ def select_features(
 
     # Calcolo target k e tolleranza
     target_k = int(round(percSelected * m))
-    min_k = target_k - allowance
-    max_k = target_k + allowance
+    min_k = max(1, target_k - allowance) # Assicura la selezione di almeno 1 feature
+    max_k = min(m, target_k + allowance)
 
     t0_q = time.time()
     # Calcolo delle correlazioni (in modulo come da specifiche)
@@ -54,18 +54,20 @@ def select_features(
     best_k = 0
     opt_times = []
 
+    print(f"Ricerca feature QUBO avviata. Target: {target_k} feature (±{allowance}).")
+
     # Ricerca del parametro alpha
     for alpha in alphas:
         t0_opt = time.time()
 
-        # Costruzione matrice QUBO (minimizzare: -alpha * Influenza + (1-alpha) * Indipendenza)
-        Q = np.zeros((m, m))
+        # FIX: Costruzione dizionario QUBO (formato standard richiesto da neal/dimod)
+        Q = {}
         for i in range(m):
-            Q[i, i] = -alpha * rho_V[i]
+            # Termine Lineare (diagonale)
+            Q[(i, i)] = -alpha * rho_V[i]
             for j in range(i + 1, m):
-                val = (1 - alpha) * corr_matrix[i, j]
-                Q[i, j] = val
-                Q[j, i] = val
+                # Termine Quadratico (solo triangolo superiore)
+                Q[(i, j)] = (1 - alpha) * corr_matrix[i, j]
 
         # Risoluzione
         response = sampler.sample_qubo(Q, seed=seed)
@@ -85,6 +87,7 @@ def select_features(
             best_vector = selected_vars
             best_alpha = alpha
             best_k = current_k
+            print(f"Trovato alpha ideale: {alpha:.4f} -> Selezionate {best_k} feature.")
             break
 
         # Se non lo troviamo, salviamo il più vicino per robustezza
@@ -99,12 +102,15 @@ def select_features(
         writer.writerow(['alpha', 'optimization_time', 'n_features', 'cost_value'])
         writer.writerows(optimizations_log)
 
-    # Taglio del dataset per il training/test set
-    cut_idx = int(len(df) * (1 - percTest))
-    train_df = df.iloc[:cut_idx]
-    test_df = df.iloc[cut_idx:]
+    # FIX: Taglio del dataset per il training/test set in modo randomizzato sicuro
+    train_df, test_df = train_test_split(df, test_size=percTest, random_state=seed)
 
-    # Riduzione delle feature
+    # Riduzione delle feature (sicurezza: se k=0, prendiamo la feature con rho_V più alto)
+    if best_k == 0:
+        print("Attenzione: il solver ha selezionato 0 feature. Forzo la selezione della migliore.")
+        best_vector[np.argmax(rho_V)] = 1
+        best_k = 1
+
     selected_feature_names = [features[i] for i in range(m) if best_vector[i] == 1]
     cols_to_keep_final = selected_feature_names + [target_column]
 
@@ -121,7 +127,7 @@ def select_features(
         "target_k": target_k,
         "allowance": allowance,
         "n_selected": best_k,
-        "alpha": float(best_alpha) if best_alpha else None,
+        "alpha": float(best_alpha) if best_alpha is not None else None,
         "selected_vector": best_vector,
         "selected_feature_names": selected_feature_names,
         "algorithm": "simulated_annealing",
@@ -130,9 +136,9 @@ def select_features(
         "percTest": percTest,
         "training_dataset_size": len(train_reduced),
         "test_dataset_size": len(test_reduced),
-        "q_matrix_creation_time": round(t_q_creation, 2),
-        "mean_optimization_time": round(np.mean(opt_times), 3),
-        "std_dev_optimization_time": round(np.std(opt_times), 3)
+        "q_matrix_creation_time": round(t_q_creation, 4),
+        "mean_optimization_time": round(np.mean(opt_times), 4),
+        "std_dev_optimization_time": round(np.std(opt_times), 4)
     }
 
     with open(output_json, 'w') as f:

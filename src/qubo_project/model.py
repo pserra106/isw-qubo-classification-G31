@@ -7,6 +7,7 @@ import joblib
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.tree import DecisionTreeClassifier
+from sklearn.svm import SVC # <-- Aggiunta per il terzo modello
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support, roc_auc_score, confusion_matrix
 
 
@@ -25,13 +26,16 @@ def train(
     y = df[target_column]
     X = df.drop(columns=[target_column])
 
-    # Selezione del classificatore
+    # Selezione del classificatore aggiornata con la SVM
     if classifier == "random_forest":
         clf = RandomForestClassifier(random_state=seed)
     elif classifier == "logistic_regression":
         clf = LogisticRegression(random_state=seed, max_iter=1000)
     elif classifier == "decision_tree":
         clf = DecisionTreeClassifier(random_state=seed)
+    elif classifier == "svm":
+        # probability=True è fondamentale per poter calcolare la ROC-AUC dopo
+        clf = SVC(probability=True, random_state=seed)
     else:
         raise ValueError("Classificatore non supportato")
 
@@ -71,8 +75,8 @@ def predict(
 
     clf = joblib.load(model_path)
 
-    # Recupera il nome del classificatore dalla classe dell'oggetto
-    clf_name = "random_forest" if isinstance(clf, RandomForestClassifier) else "other"
+    # Correzione: Recupera dinamicamente il nome reale del classificatore
+    clf_name = type(clf).__name__
 
     y_pred = clf.predict(X)
     y_scores = clf.predict_proba(X)[:, 1] if hasattr(clf, "predict_proba") else y_pred
@@ -120,31 +124,3 @@ def predict(
     with open(classif_stats_json, 'w') as f:
         json.dump(stats, f, indent=4)
 
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    # Sotto-parser per train
-    parser_train = subparsers.add_parser("train")
-    parser_train.add_argument("--classifier", required=True)
-    parser_train.add_argument("--in-reduced", required=True)
-    parser_train.add_argument("--target", required=True)
-    parser_train.add_argument("--out-model", required=True)
-    parser_train.add_argument("--out-metrics", required=True)
-    parser_train.add_argument("--seed", type=int, default=42)
-
-    # Sotto-parser per predict
-    parser_predict = subparsers.add_parser("predict")
-    parser_predict.add_argument("--input-testset", required=True)
-    parser_predict.add_argument("--target", required=True)
-    parser_predict.add_argument("--model", required=True)
-    parser_predict.add_argument("--out-predictions", required=True)
-    parser_predict.add_argument("--out-stats", required=True)
-
-    args = parser.parse_args()
-
-    if args.command == "train":
-        train(args.classifier, args.in_reduced, args.target, args.out_model, args.out_metrics, args.seed)
-    elif args.command == "predict":
-        predict(args.input_testset, args.target, args.model, args.out_predictions, args.out_stats)
