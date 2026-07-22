@@ -5,7 +5,6 @@ import time
 import argparse
 import csv
 from scipy.stats import spearmanr
-from sklearn.model_selection import train_test_split # Aggiunta per uno split sicuro e randomizzato
 import neal  # Richiede: pip install neal
 
 def select_features(
@@ -60,7 +59,7 @@ def select_features(
     for alpha in alphas:
         t0_opt = time.time()
 
-        # FIX: Costruzione dizionario QUBO (formato standard richiesto da neal/dimod)
+        # Costruzione dizionario QUBO
         Q = {}
         for i in range(m):
             # Termine Lineare (diagonale)
@@ -102,8 +101,11 @@ def select_features(
         writer.writerow(['alpha', 'optimization_time', 'n_features', 'cost_value'])
         writer.writerows(optimizations_log)
 
-    # FIX: Taglio del dataset per il training/test set in modo randomizzato sicuro
-    train_df, test_df = train_test_split(df, test_size=percTest, random_state=seed)
+    # FIX Applicato: Taglio netto del dataset per il training/test set
+    total_samples = len(df)
+    M = int(total_samples * (1 - percTest))
+    train_df = df.iloc[:M]
+    test_df = df.iloc[M:]
 
     # Riduzione delle feature (sicurezza: se k=0, prendiamo la feature con rho_V più alto)
     if best_k == 0:
