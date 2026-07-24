@@ -1,11 +1,26 @@
-# Runtime requirements for the QUBO classification project
-# Python >= 3.11
+# --- GUI ---
+streamlit>=1.30.0
 
-pandas>=2.0.0
-numpy>=1.24.0
-scikit-learn>=1.2.0
-scipy>=1.10.0
-joblib>=1.2.0
-pytest>=7.0.0
-streamlit>=1.20.0
+# --- Data Manipulation & Analysis ---
+pandas>=2.2.0
+numpy>=2.0.0
 
+# --- Machine Learning & Preprocessing ---
+scikit-learn>=1.4.0
+
+# --- Configuration & File Parsing ---
+PyYAML>=6.0.1
+
+# --- Automated Testing ---
+pytest>=8.0.0
+
+# --- QUBO & Optimization (Uncomment and use the one you need) ---
+dimod>=0.12.14
+# dwave-ocean-sdk==6.9.0
+# qiskit==1.0.0
+
+joblib
+
+pytest
+
+scikit-learn

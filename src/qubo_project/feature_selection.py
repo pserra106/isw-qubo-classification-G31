@@ -1,193 +1,286 @@
-# This module builds the QUBO matrix based on Spearman correlations
-# and varies alpha iteratively to find the desired number of features (K).
-
-import argparse
+import os
 import json
 import time
 import numpy as np
 import pandas as pd
-from pathlib import Path
 from scipy.stats import spearmanr
 
 
+def _solve_qubo_sa(Q: np.ndarray, seed: int = 42, sweeps: int = 2000,
+                   temp_start: float = 10.0, temp_end: float = 0.01) -> np.ndarray:
+    """
+    Solves QUBO problem min (x^T Q x) using Simulated Annealing.
+
+    Parameters
+    ----------
+    Q : np.ndarray
+        Symmetric QUBO matrix of size (m, m).
+    seed : int
+        Random seed for reproducibility.
+    sweeps : int
+        Number of Metropolis-Hastings iterations.
+    temp_start : float
+        Initial temperature for annealing schedule.
+    temp_end : float
+        Final temperature for annealing schedule.
+
+    Returns
+    -------
+    best_x : np.ndarray
+        Optimal binary solution vector.
+    """
+    rng = np.random.default_rng(seed)
+    m = Q.shape[0]
+
+    # Initialize random binary vector
+    x = rng.integers(0, 2, size=m, dtype=np.int8)
+
+    # Pre-calculate symmetric matrix interactions: S = Q + Q^T - diag(Q)
+    # E(x) = x^T Q x
+    S = Q + Q.T
+    np.fill_diagonal(S, np.diagonal(Q))
+
+    # Compute current energy
+    current_energy = float(x @ Q @ x)
+    best_x = x.copy()
+    best_energy = current_energy
+
+    # Exponential cooling schedule
+    temperatures = np.geomspace(temp_start, temp_end, num=sweeps)
+
+    for T in temperatures:
+        # Pick random variable to flip
+        i = rng.integers(0, m)
+
+        # Calculate energy delta for flipping x[i]
+        # x_i_new = 1 - x[i] => delta_x = 1 - 2*x[i]
+        delta_xi = 1 - 2 * x[i]
+
+        # Fast incremental delta energy computation
+        delta_E = delta_xi * (S[i] @ x - S[i, i] * x[i] + Q[i, i])
+
+        # Accept or reject move
+        if delta_E < 0 or rng.random() < np.exp(-delta_E / T):
+            x[i] = 1 - x[i]
+            current_energy += delta_E
+
+            if current_energy < best_energy:
+                best_energy = current_energy
+                best_x = x.copy()
+
+    return best_x
+
+
 def select_features(
-        normalized_csv: str,
-        reducedTrain_csv: str,
-        reducedTest_csv: str,
-        output_ottim_csv: str,
-        output_json: str,
-        target_column: str,
-        percTest: float = 0.30,
-        percSelected: float = 0.20,
-        allowance: int = 1,
-        seed: int = 42,
-        alpha_computations: int = 100
-):
+        normalized_csv: str,  # Input dataset name
+        reducedTrain_csv: str,  # Name of output training dataset with reduced feat.
+        reducedTest_csv: str,  # Name of output test dataset with reduced features
+        output_ottim_csv: str,  # Name of output optimization data varying alpha
+        output_json: str,  # Name of output statistics and data file
+        target_column: str,  # Column name of target
+        percTest: float = 0.30,  # % of test data with respect to the dataset size
+        percSelected: float = 0.20,  # Percentage of features to select
+        allowance: int = 1,  # Allowance of features to select
+        seed: int = 42,  # Seed for random repeatability
+        alpha_computations: int = 100  # Max. n. of optimizations varying alpha
+) -> None:
+    """
+    Performs feature selection via QUBO optimization by varying alpha to reach target K features.
+    """
     np.random.seed(seed)
-    start_time = time.time()
 
-    # 1. Lettura del dataset normalizzato
+    # 1. Read input dataset
     df = pd.read_csv(normalized_csv)
-
     if target_column not in df.columns:
-        raise ValueError(f"Colonna target '{target_column}' non trovata nel dataset.")
+        raise ValueError(f"Target column '{target_column}' not found in dataset.")
 
+    feature_cols = [col for col in df.columns if col != target_column]
+    m = len(feature_cols)
+
+    # Target K number of features
+    target_k = int(round(percSelected * m))
+    min_k = max(1, target_k - allowance)
+    max_k = min(m, target_k + allowance)
+
+    # 2. Build Spearman Correlation Matrices (Relevance & Redundancy)
+    t_q_start = time.perf_counter()
+
+    # Extract feature matrix X and target y
+    X = df[feature_cols].values
     y = df[target_column].values
-    X = df.drop(columns=[target_column])
 
-    feature_names = list(X.columns)
-    m_features = len(feature_names)
+    # Feature-Target Relevance: s_i = |Spearman(f_i, y)|
+    s = np.zeros(m)
+    for i in range(m):
+        corr, _ = spearmanr(X[:, i], y)
+        s[i] = np.abs(corr) if not np.isnan(corr) else 0.0
 
-    target_k = round(percSelected * m_features)
-    min_k = target_k - allowance
-    max_k = target_k + allowance
+    # Feature-Feature Redundancy: r_ij = |Spearman(f_i, f_j)|
+    r_corr, _ = spearmanr(X)
+    if m == 1:
+        r_corr = np.array([[1.0]])
+    r = np.nan_to_num(np.abs(r_corr), nan=0.0)
 
-    # 2. Divisione iniziale in training e test set per evitare data leakage durante il QUBO
-    total_samples = len(df)
-    n_test = int(total_samples * percTest)
-    n_train = total_samples - n_test
+    q_matrix_creation_time = time.perf_counter() - t_q_start
 
-    X_train = X.iloc[:n_train]
-    y_train = y[:n_train]
-    X_test = X.iloc[n_train:]
-    y_test = y[n_train:]
+    # 3. Optimization Loop Varying Alpha
+    alpha_low, alpha_high = 0.0, 1.0
 
-    # 3. Calcolo delle correlazioni di Spearman basato ESCLUSIVAMENTE sul training set
-    t_q_start = time.time()
-    n = m_features
-    corr_v = np.zeros(n)
-    for i, col in enumerate(feature_names):
-        val, _ = spearmanr(X_train[col].values, y_train)
-        corr_v[i] = abs(val) if not np.isnan(val) else 0.0
-
-    corr_matrix = np.zeros((n, n))
-    for i in range(n):
-        for j in range(i, n):
-            if i == j:
-                corr_matrix[i, j] = 1.0
-            else:
-                val, _ = spearmanr(X_train.iloc[:, i].values, X_train.iloc[:, j].values)
-                c = abs(val) if not np.isnan(val) else 0.0
-                corr_matrix[i, j] = c
-                corr_matrix[j, i] = c
-    q_matrix_creation_time = time.time() - t_q_start
-
-    # 4. Ottimizzazione variando alpha per trovare il numero K di feature tramite QUBO
-    alphas = np.linspace(0.01, 0.99, alpha_computations)
-    optimization_records = []
+    optimizations_log = []
     opt_times = []
 
-    best_x = None
-    best_alpha = 0.5
-    best_diff = float('inf')
+    best_solution = None
+    best_k_diff = float('inf')
 
-    for alpha in alphas:
-        t_opt_start = time.time()
+    for iteration in range(alpha_computations):
+        # Determine alpha for current iteration
+        if iteration == 0:
+            alpha = 0.5
+        elif iteration == 1:
+            alpha = 0.0
+        elif iteration == 2:
+            alpha = 1.0
+        else:
+            alpha = (alpha_low + alpha_high) / 2.0
 
-        # Costruzione della matrice QUBO Q: f(x) = - x^T Q x
-        Q = np.zeros((n, n))
-        for i in range(n):
-            Q[i, i] = alpha * corr_v[i]
-            for j in range(n):
-                if i != j:
-                    Q[i, j] = -(1.0 - alpha) * corr_matrix[i, j]
+        # Construct QUBO matrix Q(alpha)
+        Q = np.zeros((m, m))
 
-        # Contributo energetico marginale per ogni feature basato sulla matrice Q
-        marginal_gains = np.diag(Q) + 2.0 * np.sum(Q, axis=1)
-        sorted_indices = np.argsort(marginal_gains)[::-1]
+        # Diagonal elements (Relevance)
+        np.fill_diagonal(Q, -alpha * s)
 
-        active_ratio = np.clip(percSelected * (0.5 + alpha), 0.05, 0.95)
-        k_candidate = int(np.clip(round(n * active_ratio), 1, n))
+        # Off-diagonal elements (Redundancy)
+        for i in range(m):
+            for j in range(i + 1, m):
+                Q[i, j] = (1.0 - alpha) * r[i, j]
 
-        x = np.zeros(n, dtype=int)
-        x[sorted_indices[:k_candidate]] = 1
+        # Make Q symmetric for solver stability
+        Q_sym = 0.5 * (Q + Q.T)
 
-        cost_val = - float(x.T @ Q @ x)
-        opt_time = time.time() - t_opt_start
+        # Solve QUBO via Simulated Annealing
+        t_opt_start = time.perf_counter()
+        opt_seed = seed + iteration
+        x_sol = _solve_qubo_sa(Q_sym, seed=opt_seed)
+        t_opt_end = time.perf_counter()
+
+        opt_time = t_opt_end - t_opt_start
         opt_times.append(opt_time)
 
-        n_ones = int(np.sum(x))
-        optimization_records.append({
-            "alpha": round(float(alpha), 4),
-            "time": round(opt_time, 4),
-            "n_features": n_ones,
-            "cost": round(cost_val, 4)
+        n_selected = int(np.sum(x_sol))
+        cost_val = float(x_sol @ Q_sym @ x_sol)
+
+        optimizations_log.append({
+            "alpha": float(alpha),
+            "optimization_time": float(opt_time),
+            "n_features": n_selected,
+            "cost_function_value": cost_val,
+            "vector": x_sol.copy()
         })
 
-        diff = abs(n_ones - target_k)
-        if diff < best_diff:
-            best_diff = diff
-            best_x = x
-            best_alpha = alpha
-            if min_k <= n_ones <= max_k:
-                if diff == 0:
-                    break
+        # Update best solution tracking
+        k_diff = abs(n_selected - target_k)
+        if k_diff < best_k_diff:
+            best_k_diff = k_diff
+            best_solution = optimizations_log[-1]
 
-    if best_x is None:
-        best_x = np.zeros(n, dtype=int)
-        best_x[:target_k] = 1
+        # Check if tolerance criteria is met
+        if min_k <= n_selected <= max_k:
+            best_solution = optimizations_log[-1]
+            break
 
-    selected_indices = np.where(best_x == 1)[0]
-    selected_feature_names = [feature_names[i] for i in selected_indices]
+        # Adjust search range for binary search
+        if n_selected < min_k:
+            alpha_low = alpha  # Needs higher relevance weight (alpha)
+        else:
+            alpha_high = alpha  # Needs lower redundancy weight (1 - alpha)
 
-    # Salvataggio del log delle ottimizzazioni in CSV
-    Path(output_ottim_csv).parent.mkdir(parents=True, exist_ok=True)
-    df_opt = pd.DataFrame(optimization_records)
-    df_opt.to_csv(output_ottim_csv, index=False)
+    # 4. Save Optimization Log CSV
+    optim_df = pd.DataFrame([
+        {
+            "alpha": row["alpha"],
+            "optimization_time": row["optimization_time"],
+            "n_features": row["n_features"],
+            "cost_function_value": row["cost_function_value"]
+        }
+        for row in sorted(optimizations_log, key=lambda x: x["alpha"])
+    ])
 
-    # 5. Applicazione della riduzione delle feature sia al Training che al Test set
-    X_train_reduced = X_train.iloc[:, selected_indices].copy()
-    X_train_reduced[target_column] = y_train
+    if os.path.dirname(output_ottim_csv):
+        os.makedirs(os.path.dirname(output_ottim_csv), exist_ok=True)
+    optim_df.to_csv(output_ottim_csv, index=False)
 
-    X_test_reduced = X_test.iloc[:, selected_indices].copy()
-    X_test_reduced[target_column] = y_test
+    # 5. Extract Final Selected Features & Reduce Dataset
+    final_vector = best_solution["vector"]
+    selected_indices = np.where(final_vector == 1)[0]
+    selected_feature_names = [feature_cols[i] for i in selected_indices]
 
-    Path(reducedTrain_csv).parent.mkdir(parents=True, exist_ok=True)
-    Path(reducedTest_csv).parent.mkdir(parents=True, exist_ok=True)
-    X_train_reduced.to_csv(reducedTrain_csv, index=False)
-    X_test_reduced.to_csv(reducedTest_csv, index=False)
+    # Filter dataset: Selected features + Target column at the end
+    reduced_cols = selected_feature_names + [target_column]
+    df_reduced = df[reduced_cols]
 
-    # 6. Salvataggio del report JSON finale
-    result_data = {
-        "n_features": int(m_features),
-        "target_ratio": float(np.mean(y)),
-        "target_k": int(target_k),
-        "allowance": int(allowance),
-        "n_selected": int(len(selected_feature_names)),
-        "alpha": round(float(best_alpha), 4),
-        "selected_vector": best_x.tolist(),
+    # Strict sequential split ("Taglio Netto" - Section 7.3)
+    n_total = len(df_reduced)
+    n_test = int(round(n_total * percTest))
+    m_train_idx = n_total - n_test
+
+    df_train = df_reduced.iloc[:m_train_idx].copy()
+    df_test = df_reduced.iloc[m_train_idx:].copy()
+
+    # Save reduced CSV files
+    if os.path.dirname(reducedTrain_csv):
+        os.makedirs(os.path.dirname(reducedTrain_csv), exist_ok=True)
+    if os.path.dirname(reducedTest_csv):
+        os.makedirs(os.path.dirname(reducedTest_csv), exist_ok=True)
+
+    df_train.to_csv(reducedTrain_csv, index=False)
+    df_test.to_csv(reducedTest_csv, index=False)
+
+    # 6. Save JSON Statistics
+    json_stats = {
+        "n_features": m,
+        "target_ratio": percSelected,
+        "target_k": target_k,
+        "allowance": allowance,
+        "n_selected": int(best_solution["n_features"]),
+        "alpha": float(best_solution["alpha"]),
+        "selected_vector": final_vector.tolist(),
         "selected_feature_names": selected_feature_names,
-        "algorithm": "greedy_qubo_spearman",
-        "seed": int(seed),
-        "alpha_computations": len(optimization_records),
-        "percTest": float(percTest),
-        "training_dataset_size": int(len(X_train)),
-        "test_dataset_size": int(len(X_test)),
-        "q_matrix_creation_time": round(q_matrix_creation_time, 4),
+        "algorithm": "simulated_annealing",
+        "seed": seed,
+        "alpha_computations": len(optimizations_log),
+        "percTest": percTest,
+        "training_dataset_size": len(df_train),
+        "test_dataset_size": len(df_test),
+        "q_matrix_creation_time": round(float(q_matrix_creation_time), 4),
         "mean_optimization_time": round(float(np.mean(opt_times)), 4),
         "std_dev_optimization_time": round(float(np.std(opt_times)), 4)
     }
 
-    Path(output_json).parent.mkdir(parents=True, exist_ok=True)
-    with open(output_json, 'w', encoding='utf-8') as f:
-        json.dump(result_data, f, indent=4)
+    if os.path.dirname(output_json):
+        os.makedirs(os.path.dirname(output_json), exist_ok=True)
+
+    with open(output_json, "w", encoding="utf-8") as f:
+        json.dump(json_stats, f, indent=4)
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="QUBO Feature Selection")
-    parser.add_argument("--in-normalized", required=True, help="Input normalized dataset CSV path")
-    parser.add_argument("--out-train", required=True, help="Output reduced training CSV path")
-    parser.add_argument("--out-test", required=True, help="Output reduced test CSV path")
-    parser.add_argument("--out-optimizations", required=True, help="Output optimizations CSV log path")
-    parser.add_argument("--out-json", required=True, help="Output summary JSON path")
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Feature Selection via QUBO Optimization")
+    parser.add_argument("--in-normalized", required=True, help="Input normalized CSV file")
+    parser.add_argument("--out-train", required=True, help="Output reduced training CSV file")
+    parser.add_argument("--out-test", required=True, help="Output reduced test CSV file")
+    parser.add_argument("--out-optimizations", required=True, help="Output optimization log CSV file")
+    parser.add_argument("--out-json", required=True, help="Output JSON statistics file")
     parser.add_argument("--target", required=True, help="Target column name")
+    parser.add_argument("--perc-selected", type=float, default=0.20, help="Percentage of features to select")
+    parser.add_argument("--allowance", type=int, default=1, help="Allowance of features to select")
     parser.add_argument("--perc-test", type=float, default=0.30, help="Percentage of test data")
-    parser.add_argument("--perc-selected", type=float, default=0.20, help="Target percentage of features to select")
-    parser.add_argument("--allowance", type=int, default=1, help="Allowed tolerance on K features")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
-    parser.add_argument("--alpha-computations", type=int, default=100, help="Number of alpha iterations")
+    parser.add_argument("--alpha-computations", type=int, default=100, help="Max optimizations varying alpha")
 
     args = parser.parse_args()
+
     select_features(
         normalized_csv=args.in_normalized,
         reducedTrain_csv=args.out_train,

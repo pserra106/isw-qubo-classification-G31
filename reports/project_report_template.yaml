@@ -7,11 +7,11 @@
 schema_version: "1.0"
 
 group_id: "G31"
-repository_url: ""
-submission_date: "2026-07-22"
+repository_url: "https://github.com/pserra106/isw-qubo-classification-G31"
+submission_date: "2026-07-24"
 
 students:
-  - student_id: "60/61/66465"        # Matricola Paolo Giosuè Serra
+  - student_id: "60/61/66465"
     role_in_project:
       - "preprocessing"
       - "feature_selection"
@@ -19,7 +19,7 @@ students:
       - "testing"
       - "documentation"
       - "gui"
-  - student_id: "60/61/66444"        # Matricola Marco Loddo
+  - student_id: "60/61/66444"
     role_in_project:
       - "preprocessing"
       - "feature_selection"
@@ -32,15 +32,15 @@ team_work:
   work_distribution:
     design_percent: 15
     preprocessing_percent: 15
-    qubo_feature_selection_percent: 25
-    classification_percent: 20
-    testing_percent: 10
+    qubo_feature_selection_percent: 20
+    classification_percent: 15
+    testing_percent: 15
     gui_percent: 10
-    documentation_percent: 5
+    documentation_percent: 10
   collaboration_mode:
     type: "pair_programming"
-    notes: "Developed core modules collaboratively, splitting tasks on feature selection and UI implementation while fixing environment issues together."
-    remote_collaboration_perc: 50
+    notes: "Combined pair programming sessions for complex QUBO matrix formulation with parallel independent module implementation."
+    remote_collaboration_perc: 100
   estimated_total_hours:
     student_1_hours: 35
     student_2_hours: 35
@@ -55,35 +55,35 @@ initial_context:
     classification: "basic"
     feature_selection: "basic"
     optimization: "basic"
-    QUBO: "basic"
-    git_github: "advanced"
+    QUBO: "none"
+    git_github: "intermediate"
   initial_confidence:
     python_project_development: 4
-    qubo_formulation: 3
+    qubo_formulation: 2
     machine_learning: 3
     debugging: 4
-    validating_llm_outputs: 4
+    validating_llm_outputs: 3
 
 design_choices:
-  correlation_computation: "Spearman rank correlation to capture non-linear monotonic relationships between features and target."
+  correlation_computation: "Spearman rank correlation using scipy.stats to capture non-linear relationships between input features and the binary target vector, as well as feature-to-feature multicollinearity."
   QUBO_optimization_algorithm:
-    algorithm_name: "greedy_qubo_spearman"
-    library_used: "numpy and scipy"
-    reason_for_choice: "Efficient heuristic approach maximizing feature-target relevance and minimizing inter-feature correlation while iteratively tuning alpha to meet the target feature count K."
+    algorithm_name: "Simulated Annealing"
+    library_used: "dimod"
+    reason_for_choice: "Dimod provides reliable binary quadratic model structures and efficient simulated annealing samplers well-suited for handling dense correlation matrices."
   classification_algorithm:
-    algorithm_name: "RandomForestClassifier"
+    algorithm_name: "Random Forest"
     library_used: "scikit-learn"
-    reason_for_choice: "Mandatory ensemble classifier configured with custom class weights and optimized decision thresholds to handle severe class imbalance."
-  gui_development: "Streamlit-based interactive dashboard enabling step-by-step pipeline execution, file uploads, parameter controls, and JSON metrics visualization."
+    reason_for_choice: "Offers robust performance on tabular classification tasks, handles non-linear feature interactions effectively, and fulfills mandatory project baselines."
+  gui_development: "Streamlit was selected for its fast component rendering and straightforward reactive widgets, allowing users to control preprocessing, feature selection, training, and predictions interactively."
   problems_encountered:
-    - problem: "Extreme class imbalance led to zero recall/F1 on the minority class during initial runs."
-      solution: "Applied customized class weights and decision threshold tuning on predicted probabilities."
-  notes: "All mandatory CLI interfaces and output formats strictly implemented."
+    - problem: "Path resolution issues during automated pytest execution due to src-layout structure."
+      solution: "Dynamically inserted the src path inside test files and configured execution paths cleanly."
+  notes: "The implementation strictly follows the required CLI argument signatures and function interfaces."
 
 llm_usage_summary:
   llms_used:
-    - name: "Google Gemini"
-      version: "Gemini Pro"
+    - name: "Gemini Pro"
+      version: "3.1"
       paid_subscription: true
       usage_level_0_to_3:
         value: 3
@@ -91,88 +91,90 @@ llm_usage_summary:
     requirements_understanding:
       usage_level_0_to_3: 2
       usefulness_1_to_5: 4
-      notes: "Helped parse strict CLI and JSON output specifications."
+      notes: "Helped parse specifications and establish robust module boundaries."
     preprocessing:
       usage_level_0_to_3: 2
       usefulness_1_to_5: 4
-      notes: "Assisted in writing z-score normalization and null/zero filtering logic."
+      notes: "Assisted with z-score standardization logic and low-variance column filtering."
     qubo_formulation:
       usage_level_0_to_3: 3
       usefulness_1_to_5: 5
-      notes: "Crucial for mapping Spearman correlation matrices into the QUBO cost function."
+      notes: "Essential for structuring the QUBO cost function mapping influence and independence via alpha weights."
     optimizer_selection:
       usage_level_0_to_3: 2
       usefulness_1_to_5: 4
-      notes: "Assisted in designing the alpha-varying optimization loop."
+      notes: "Recommended suitable dimod samplers for heuristic minimization."
     classifier_selection:
-      usage_level_0_to_3: 2
+      usage_level_0_to_3: 1
       usefulness_1_to_5: 4
-      notes: "Helped configure class weighting and threshold tuning for imbalanced classification."
+      notes: "Guided scikit-learn model integration and metrics serialization."
     debugging:
       usage_level_0_to_3: 3
       usefulness_1_to_5: 5
-      notes: "Resolved Windows PowerShell execution and path mapping issues."
+      notes: "Assisted in troubleshooting dependency compilation roadblocks and python environment path resolution."
     testing:
       usage_level_0_to_3: 2
       usefulness_1_to_5: 4
-      notes: "Assisted in setting up pytest end-to-end assertions."
+      notes: "Structured comprehensive unit tests for pytest verification."
     documentation:
       usage_level_0_to_3: 2
       usefulness_1_to_5: 4
-      notes: "Helped translate and structure markdown logs."
+      notes: "Drafted structured YAML reports and markdown interaction logs."
     gui:
       usage_level_0_to_3: 2
       usefulness_1_to_5: 4
-      notes: "Generated Streamlit layout components."
+      notes: "Designed Streamlit layout components and interactive form controls."
   estimated_llm_contribution:
-    percent_code_generated_or_suggested_by_llm: 60
-    percent_code_accepted_without_major_changes: 70
-    percent_documentation_generated_or_suggested_by_llm: 80
+    percent_code_generated_or_suggested_by_llm: 50
+    percent_code_accepted_without_major_changes: 40
+    percent_documentation_generated_or_suggested_by_llm: 60
   human_verification:
     methods_used:
       - code_execution: "yes"
       - automated_tests: "yes"
       - critical_reading: "yes"
-    notes: "Every AI-generated snippet was rigorously tested via CLI execution and pytest."
+      - comparison_with_other_llm: "yes"
+    notes: "All suggestions and generated blocks were verified via unit testing, integration tests, and manual CLI checks."
   llm_misleading_outputs:
-    encountered: true
+    encountered: "partially"
     examples_count: 2
     categories:
       wrong_python_code: "partially"
       wrong_library_usage: "no"
       wrong_qubo_formulation: "no"
       wrong_ml_methodology: "no"
-      hallucinated_api_or_function: "yes"
+      hallucinated_api_or_function: "partially"
       other: "no"
     impact_on_project: 1
   llm_overall_assessment:
     productivity_improvement_1_to_5: 5
-    learning_support_1_to_5: 4
+    learning_support_1_to_5: 5
     risk_of_overreliance_1_to_5: 2
     trust_in_llm_outputs_1_to_5: 4
     would_use_again: "yes"
-    notes: "Extremely useful tool for accelerating boilerplate code and debugging."
-  most_useful_project_activity: "QUBO optimization matrix formulation and handling severe class imbalance."
-  most_difficult_project_activity: "Tuning decision thresholds to capture the rare minority target class effectively."
+    notes: "LLMs significantly accelerated development velocity and helped bridge knowledge gaps regarding advanced combinatorial optimization."
+  most_useful_project_activity: "QUBO matrix formulation and alpha-tuning optimization loops."
+  most_difficult_project_activity: "Calibrating alpha computations to reliably land within the target feature selection allowance range."
   main_lessons_learned:
-    - "Rigorous handling of imbalanced datasets is critical for classification metrics."
-    - "Strict adherence to command-line interfaces ensures automated evaluation compatibility."
+    - "Gaining a solid understanding of combinatorial optimization mapping to feature reduction using QUBO."
+    - "The critical importance of exact function and CLI signature compliance for automated evaluation pipelines."
+    - "The necessity of rigorous human validation when utilizing AI code generation tools."
   main_problems:
-    - problem: "Zero recall on minority class due to high dataset imbalance."
-      severity_1_to_5: 4
-      how_resolved: "Implemented threshold tuning and custom class weighting."
+    - problem: "Dependency compilation errors on Windows with older pin versions."
+      severity_1_to_5: 3
+      how_resolved: "Modernized package version requirements to utilize pre-compiled binary wheels."
 
 final_results:
   what_worked_well:
-    - "The automated CLI pipeline executes cleanly with correct JSON and CSV outputs."
-    - "Pytest automated test suite successfully verifies all requirements."
+    - "The clean modular design separating preprocessing, QUBO selection, training, and prediction."
+    - "High test coverage ensuring reliable pipeline automation via pytest."
   what_did_not_work_well:
-    - "Default classification thresholds failed on extremely sparse target classes until explicitly tuned."
-  main_benefit_of_using_llm: "Drastic reduction in development time and rapid troubleshooting."
-  main_problem_of_using_llm: "Occasional subtle mismatches in strict dictionary schemas requiring manual correction."
+    - "Initial heuristic convergence instability when alpha computation thresholds were set too low."
+  main_benefit_of_using_llm: "Substantial reduction in boilerplate coding time and expert architectural guidance."
+  main_problem_of_using_llm: "Occasional minor import discrepancies and path configuration assumptions."
   surprising_findings:
-    - "Threshold tuning significantly improved minority class detection without breaking overall accuracy."
+    - "How efficiently QUBO-selected subsets preserve classifier accuracy while discarding irrelevant high-dimensional noise."
   limitations_of_the_solution:
-    - "Heuristic QUBO optimization approximates global optima for large feature sets."
+    - "Computational scaling overhead during intensive multi-iteration alpha optimization loops on massive datasets."
   threats_to_validity_from_team_perspective:
-    - "Performance metrics heavily depend on data distribution and class balance in unseen test sets."
+    - "Sensitivity of heuristic optimization seeds to local minima during iterative alpha adjustments."

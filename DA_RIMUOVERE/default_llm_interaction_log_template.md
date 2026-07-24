@@ -13,15 +13,15 @@ The same day must not be covered by more than one interaction log. If you feel t
 ## Metadata
 
 ```yaml
-group_id: "GXX"
-repository_url: "https://github.com/..."
+group_id: "G31"
+repository_url: "https://github.com/pserra106/isw-qubo-classification-G31"
 students:
-  - matricola: "60/61/XXXXX"
-    name: "Student 1"
-  - matricola: "60/61/XXXXX"
-    name: "Student 2"
-last_update: "YYYY-MM-DD"
-log_id: "GXX-NN"
+  - matricola: "60/61/66465"
+    name: "Paolo Giosuè Serra"
+  - matricola: "60/61/66444"
+    name: "Marco Loddo"
+last_update: "2026-07-24"
+log_id: "G31-01"
 ```
 
 ---
@@ -30,21 +30,21 @@ log_id: "GXX-NN"
 
 ---
 
-## Interaction GXX-MM-DD-001
+## Interaction G31-07-24-001
 
 ### 1. LLM and chat information
 
 ```yaml
-llm_name: "ChatGPT / Claude / Gemini / Copilot / Cursor / DeepSeek / Other"
-llm_version_or_model: "e.g. GPT-5, Claude Sonnet 4.5, Gemini 2.5 Pro"
-chat_name_or_identifier: "Short name or identifier of the active chat"
-interaction_mode: "web_chat / IDE_assistant / API / desktop_app / other"
+llm_name: "Gemini"
+llm_version_or_model: "Gemini 3.1 Pro"
+chat_name_or_identifier: "Software Engineering Project"
+interaction_mode: "web_chat"
 ```
 
 ### 2. Author of the interaction
 
 ```yaml
-performed_by: "couple"   # use "couple" or the matricola of the individual student
+performed_by: "couple"
 ```
 
 ### 3. Project phase
@@ -209,3 +209,36 @@ Before submission, verify that:
 - [ ] The full LLM response is included or correctly referenced as a separate file.
 - [ ] Every downloaded/generated file has a unique name, is present in the repository and is correctly referenced in this log.
 - [ ] Problems, errors, and hallucinations have been reported honestly.
+
+
+
+
+
+
+
+
+FILE ALLEGATI:
+
+
+MIO PROMPT:
+
+
+
+RISPOSTA:
+
+
+FASE DEL PROGETTO: (SCEGLI TU)
+
+
+
+I nomi dei file in cui hai salvato il codice generato: (SCEGLI TU)
+
+Come hai usato il codice: lo hai incollato così com'era? Hai dovuto modificarlo? C'erano degli errori?: (SCEGLI TU)
+
+
+
+
+
+
+
+

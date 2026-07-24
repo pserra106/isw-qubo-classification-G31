@@ -1,182 +1,239 @@
-# Implementa i tre classificatori richiesti (incluso Random Forest) e
-# le funzioni train e predict con i relativi output JSON e CSV.
-
-import argparse
-import json
+import os
 import time
+import json
+import argparse
 import joblib
-import numpy as np
 import pandas as pd
-from pathlib import Path
+import numpy as np
+
+# Classifiers
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
+
+# Metrics
 from sklearn.metrics import (
-    accuracy_score, precision_recall_fscore_support,
-    roc_auc_score, confusion_matrix
+    accuracy_score,
+    precision_recall_fscore_support,
+    roc_auc_score,
+    confusion_matrix
 )
 
-def get_classifier(name: str, seed: int):
-    if name == "random_forest":
-        return RandomForestClassifier(random_state=seed)
-    elif name == "logistic_regression":
-        return LogisticRegression(random_state=seed, max_iter=1000)
-    elif name == "gradient_boosting":
-        return GradientBoostingClassifier(random_state=seed)
-    else:
-        raise ValueError(f"Classificatore non supportato: {name}.")
 
 def train(
-        classifier: str,
-        reducedTrain_csv: str,
-        target_column: str,
-        model_path: str,
-        metrics_json: str,
-        seed: int = 42
+        classifier: str,  # classifier to use
+        reducedTrain_csv: str,  # training dataset
+        target_column: str,  # target column name
+        model_path: str,  # saved trained classifier
+        metrics_json: str,  # file with training statistics
+        seed: int = 42,
 ):
-    t_start = time.time()
-    df = pd.read_csv(reducedTrain_csv)
-    input_time = time.time() - t_start
+    """
+    Trains a selected binary classifier on the reduced training dataset.
+    """
+    valid_classifiers = ["random_forest", "logistic_regression", "gradient_boosting"]
+    if classifier not in valid_classifiers:
+        raise ValueError(f"Invalid classifier '{classifier}'. Must be one of: {valid_classifiers}")
 
-    if target_column not in df.columns:
-        raise ValueError(f"Colonna target '{target_column}' non trovata nel training set.")
+    # 1. Read input dataset and measure input time
+    t0_input = time.perf_counter()
+    df_train = pd.read_csv(reducedTrain_csv)
+    dataset_input_time = time.perf_counter() - t0_input
 
-    y = df[target_column].values
-    X = df.drop(columns=[target_column])
+    if target_column not in df_train.columns:
+        raise ValueError(f"Target column '{target_column}' not found in dataset.")
 
-    clf = get_classifier(classifier, seed)
+    # 2. Extract features and target
+    X_train = df_train.drop(columns=[target_column])
+    y_train = df_train[target_column]
 
-    t_train_start = time.time()
-    clf.fit(X, y)
-    training_time = time.time() - t_train_start
+    n_samples = len(df_train)
+    n_features = len(X_train.columns)
 
-    Path(model_path).parent.mkdir(parents=True, exist_ok=True)
+    target_1_count = int(y_train.sum())
+    target_1_percentage = (target_1_count / n_samples) * 100.0
+
+    # 3. Instantiate the selected model
+    if classifier == "random_forest":
+        clf = RandomForestClassifier(random_state=seed)
+    elif classifier == "logistic_regression":
+        clf = LogisticRegression(random_state=seed, max_iter=1000)
+    elif classifier == "gradient_boosting":
+        clf = GradientBoostingClassifier(random_state=seed)
+
+    # 4. Train the classifier and measure training time
+    t0_train = time.perf_counter()
+    clf.fit(X_train, y_train)
+    training_time = time.perf_counter() - t0_train
+
+    # Attach the classifier name to the model object so predict() can retrieve it
+    clf.custom_classifier_name_ = classifier
+
+    # 5. Save the trained model
+    if os.path.dirname(model_path):
+        os.makedirs(os.path.dirname(model_path), exist_ok=True)
     joblib.dump(clf, model_path)
 
-    target_1_count = int(np.sum(y == 1))
-    target_1_percentage = float((target_1_count / len(y)) * 100) if len(y) > 0 else 0.0
-
-    metrics = {
+    # 6. Save the metrics JSON
+    metrics_data = {
         "classifier": classifier,
         "seed": seed,
-        "training_dataset": str(reducedTrain_csv),
+        "training_dataset": os.path.basename(reducedTrain_csv),
         "target_column": target_column,
-        "model_path": str(model_path),
-        "n_samples": int(len(df)),
-        "n_features": int(X.shape[1]),
-        "target_1_percentage": round(target_1_percentage, 4),
-        "dataset_input_time": round(input_time, 4),
-        "training_time": round(training_time, 4)
+        "model_path": os.path.basename(model_path),
+        "n_samples": n_samples,
+        "n_features": n_features,
+        "target_1_percentage": round(target_1_percentage, 2),
+        "dataset_input_time": round(dataset_input_time, 2),
+        "training_time": round(training_time, 2)
     }
 
-    Path(metrics_json).parent.mkdir(parents=True, exist_ok=True)
-    with open(metrics_json, 'w', encoding='utf-8') as f:
-        json.dump(metrics, f, indent=4)
+    if os.path.dirname(metrics_json):
+        os.makedirs(os.path.dirname(metrics_json), exist_ok=True)
+
+    with open(metrics_json, "w", encoding="utf-8") as f:
+        json.dump(metrics_data, f, indent=4)
 
 
 def predict(
-        reduced_Test_csv: str,
-        target_column: str,
-        model_path: str,
-        predictions_csv: str,
-        classif_stats_json: str
+        reduced_Test_csv: str,  # Input test set
+        target_column: str,  # Target column name
+        model_path: str,  # saved trained classifier to use
+        predictions_csv: str,  # Output predictions
+        classif_stats_json: str,  # File with classification stats
 ):
-    df = pd.read_csv(reduced_Test_csv)
-    if target_column not in df.columns:
-        raise ValueError(f"Colonna target '{target_column}' non trovata nel test set.")
+    """
+    Loads a trained classifier, makes predictions on the test dataset,
+    and outputs predictions and evaluation statistics.
+    """
+    # 1. Load the dataset
+    df_test = pd.read_csv(reduced_Test_csv)
 
-    y_true = df[target_column].values
-    X_test = df.drop(columns=[target_column])
+    if target_column not in df_test.columns:
+        raise ValueError(f"Target column '{target_column}' not found in dataset.")
 
+    X_test = df_test.drop(columns=[target_column])
+    y_true = df_test[target_column]
+
+    n_samples = len(df_test)
+    target_1_count = int(y_true.sum())
+    target_1_percentage = (target_1_count / n_samples) * 100.0
+
+    # 2. Load the trained model
     clf = joblib.load(model_path)
+    classifier_name = getattr(clf, "custom_classifier_name_", "unknown_classifier")
 
-    # Predizioni standard di probabilità e classi con soglia standard 0.5
-    y_scores = clf.predict_proba(X_test)[:, 1] if hasattr(clf, "predict_proba") else clf.predict(X_test).astype(float)
-    y_pred = clf.predict(X_test) if hasattr(clf, "predict") else (y_scores >= 0.5).astype(int)
+    # 3. Generate predictions and probability scores
+    y_pred = clf.predict(X_test)
 
-    # Salvataggio predizioni CSV
-    df_preds = pd.DataFrame({
-        "row_n": range(len(df)),
-        "target": y_true,
+    # Attempt to get probabilities for the positive class (class 1)
+    if hasattr(clf, "predict_proba"):
+        y_score = clf.predict_proba(X_test)[:, 1]
+    else:
+        # Fallback if a model does not support predict_proba
+        y_score = y_pred.astype(float)
+
+    # 4. Save the predictions CSV
+    predictions_df = pd.DataFrame({
+        "row_n": range(n_samples),
+        "target": y_true.values,
         "prediction": y_pred,
-        "score": y_scores
+        "score": np.round(y_score, 4)
     })
-    Path(predictions_csv).parent.mkdir(parents=True, exist_ok=True)
-    df_preds.to_csv(predictions_csv, index=False)
 
-    # Calcolo metriche standard con etichette [0, 1]
-    acc = float(accuracy_score(y_true, y_pred))
-    precision, recall, f1, support = precision_recall_fscore_support(y_true, y_pred, labels=[0, 1], zero_division=0)
+    if os.path.dirname(predictions_csv):
+        os.makedirs(os.path.dirname(predictions_csv), exist_ok=True)
+    predictions_df.to_csv(predictions_csv, index=False)
+
+    # 5. Calculate Classification Quality Statistics
+    acc = accuracy_score(y_true, y_pred)
+
+    # Calculate precision, recall, f1, and support for classes 0 and 1
+    # labels=[0, 1] ensures that arrays consistently map index 0 to class 0, index 1 to class 1
+    precisions, recalls, f1_scores, supports = precision_recall_fscore_support(
+        y_true, y_pred, labels=[0, 1], zero_division=0
+    )
 
     try:
-        roc_auc = float(roc_auc_score(y_true, y_scores))
-    except Exception:
-        roc_auc = 0.0
+        roc_auc = roc_auc_score(y_true, y_score)
+    except ValueError:
+        roc_auc = 0.0  # Occurs if only one class is present in y_true
 
-    cm = confusion_matrix(y_true, y_pred, labels=[0, 1]) # Allineato all'ordine standard [0, 1]
+    cm = confusion_matrix(y_true, y_pred, labels=[0, 1])
 
-    classifier_name = getattr(clf, "__class__", type(clf)).__name__.lower()
-    if "randomforest" in classifier_name:
-        classifier_str = "random_forest"
-    elif "logistic" in classifier_name:
-        classifier_str = "logistic_regression"
-    elif "gradient" in classifier_name:
-        classifier_str = "gradient_boosting"
-    else:
-        classifier_str = classifier_name
-
-    stats = {
-        "classifier": classifier_str,
-        "n_samples": int(len(df)),
-        "target_1_count": int(np.sum(y_true == 1)),
-        "target_1_percentage": float((np.sum(y_true == 1) / len(y_true)) * 100) if len(y_true) > 0 else 0.0,
-        "accuracy": acc,
+    # 6. Save the Stats JSON
+    stats_data = {
+        "classifier": classifier_name,
+        "n_samples": n_samples,
+        "target_1_count": target_1_count,
+        "target_1_percentage": round(target_1_percentage, 2),
+        "accuracy": float(acc),
         "class_0": {
-            "precision": float(precision[0]),
-            "recall": float(recall[0]),
-            "f1": float(f1[0]),
-            "support": int(support[0])
+            "precision": float(precisions[0]),
+            "recall": float(recalls[0]),
+            "f1": float(f1_scores[0]),
+            "support": int(supports[0])
         },
         "class_1": {
-            "precision": float(precision[1]),
-            "recall": float(recall[1]),
-            "f1": float(f1[1]),
-            "support": int(support[1])
+            "precision": float(precisions[1]),
+            "recall": float(recalls[1]),
+            "f1": float(f1_scores[1]),
+            "support": int(supports[1])
         },
-        "roc_auc": roc_auc,
+        "roc_auc": float(roc_auc),
         "confusion_matrix": {
             "labels": [0, 1],
             "matrix": cm.tolist()
         }
     }
 
-    Path(classif_stats_json).parent.mkdir(parents=True, exist_ok=True)
-    with open(classif_stats_json, 'w', encoding='utf-8') as f:
-        json.dump(stats, f, indent=4)
+    if os.path.dirname(classif_stats_json):
+        os.makedirs(os.path.dirname(classif_stats_json), exist_ok=True)
+
+    with open(classif_stats_json, "w", encoding="utf-8") as f:
+        json.dump(stats_data, f, indent=4)
+
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Model Training and Prediction")
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    parser = argparse.ArgumentParser(description="Phase 3 & 4: Classifier Training and Prediction")
 
-    # Train parser
-    p_train = subparsers.add_parser("train")
-    p_train.add_argument("--classifier", required=True)
-    p_train.add_argument("--in-reduced", required=True)
-    p_train.add_argument("--target", required=True)
-    p_train.add_argument("--out-model", required=True)
-    p_train.add_argument("--out-metrics", required=True)
-    p_train.add_argument("--seed", type=int, default=42)
+    # Create subparsers for "train" and "predict" modes
+    subparsers = parser.add_subparsers(dest="command", required=True, help="Sub-command to run")
 
-    # Predict parser
-    p_pred = subparsers.add_parser("predict")
-    p_pred.add_argument("--input-testset", required=True)
-    p_pred.add_argument("--target", required=True)
-    p_pred.add_argument("--model", required=True)
-    p_pred.add_argument("--out-predictions", required=True)
-    p_pred.add_argument("--out-stats", required=True)
+    # ----- TRAIN SUBPARSER -----
+    parser_train = subparsers.add_parser("train", help="Train the classifier")
+    parser_train.add_argument("--classifier", type=str, required=True, help="Classifier to use (e.g., random_forest)")
+    parser_train.add_argument("--in-reduced", type=str, required=True, help="Training dataset (.csv)")
+    parser_train.add_argument("--target", type=str, required=True, help="Target column name")
+    parser_train.add_argument("--out-model", type=str, required=True, help="Path to save trained classifier (.joblib)")
+    parser_train.add_argument("--out-metrics", type=str, required=True, help="Path to save training statistics (.json)")
+    parser_train.add_argument("--seed", type=int, default=42, help="Seed for random reproducibility")
+
+    # ----- PREDICT SUBPARSER -----
+    parser_predict = subparsers.add_parser("predict", help="Generate predictions using a trained classifier")
+    parser_predict.add_argument("--input-testset", type=str, required=True, help="Input test set (.csv)")
+    parser_predict.add_argument("--target", type=str, required=True, help="Target column name")
+    parser_predict.add_argument("--model", type=str, required=True, help="Saved trained classifier to use (.joblib)")
+    parser_predict.add_argument("--out-predictions", type=str, required=True, help="Output predictions (.csv)")
+    parser_predict.add_argument("--out-stats", type=str, required=True, help="File with classification stats (.json)")
 
     args = parser.parse_args()
 
+    # Dispatch to the appropriate function based on the CLI sub-command
     if args.command == "train":
-        train(args.classifier, args.in_reduced, args.target, args.out_model, args.out_metrics, args.seed)
+        train(
+            classifier=args.classifier,
+            reducedTrain_csv=args.in_reduced,
+            target_column=args.target,
+            model_path=args.out_model,
+            metrics_json=args.out_metrics,
+            seed=args.seed
+        )
     elif args.command == "predict":
-        predict(args.input_testset, args.target, args.model, args.out_predictions, args.out_stats)
+        predict(
+            reduced_Test_csv=args.input_testset,
+            target_column=args.target,
+            model_path=args.model,
+            predictions_csv=args.out_predictions,
+            classif_stats_json=args.out_stats
+        )
+
