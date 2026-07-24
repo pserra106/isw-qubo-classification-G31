@@ -1,3 +1,10 @@
+import sys
+from pathlib import Path
+
+SRC_DIR = Path(__file__).resolve().parent.parent
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+
 import os
 import json
 import streamlit as st
@@ -10,12 +17,12 @@ from qubo_project.model import train, predict
 
 # Configure page layout
 st.set_page_config(
-    page_title="Eolo QUBO Classification Project",
+    page_title="G31 QUBO Classification Project",
     page_icon="⚡",
     layout="wide"
 )
 
-st.title("⚡ Eolo QUBO Project GUI")
+st.title("⚡ G31 QUBO Project GUI")
 st.markdown("Binary classification pipeline with QUBO feature reduction[cite: 5, 6].")
 
 # Ensure required directories exist
